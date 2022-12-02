@@ -77,7 +77,7 @@ fn main() ->() {
     }else if path.is_dir() {
       load_dir(path, &mut units,root,&bar);
     }else {
-      println!("{}输入文件不存在",error_text);
+      bar.println(format!("{}输入文件不存在",error_text));
       return;
     }
     bar.set_prefix("Writing");
@@ -91,6 +91,7 @@ fn main() ->() {
   //检测ini
   if units.is_empty() {
     bar.println(format!("{}缺少有效ini文件输入",error_text));
+    bar.finish_and_clear();
     exit(0);
   }
 }
