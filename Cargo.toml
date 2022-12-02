@@ -1,0 +1,12 @@
+[package]
+name = "rwc"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap = { version = "3", features = ["yaml"] }
+rust-ini = "0.18"
+colored = "2.0.0"
+walkdir = "2.3.2"
+rand = "*"
+indicatif = "0.17.2"

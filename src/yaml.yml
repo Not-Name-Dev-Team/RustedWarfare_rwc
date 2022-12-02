@@ -1,0 +1,38 @@
+
+name: rwc
+version: "1.0"
+about: 为Rusted Warfare制作的ini混淆工具
+author: By EElainaya
+
+args:
+    - help:
+        help: 使用帮助
+        short: h
+        long: help
+
+    - input:
+        help: 输入文件或文件夹
+        short: i
+        long: input
+        takes_value: true
+
+    - version:
+        help: 查看当前版本
+        short: v
+        long: version
+
+    - output:
+        help: 输出文件夹路径
+        short: o
+        long: output
+        takes_value: true
+
+    - root:
+        help: 设置ROOT路径
+        short: r
+        long: root
+        takes_value: true
+
+subcommands:
+    - help:
+        about: 帮助
