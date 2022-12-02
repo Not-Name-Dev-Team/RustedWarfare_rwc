@@ -1,7 +1,8 @@
 
 name: rwc
 version: "1.0"
-about: 为Rusted Warfare制作的ini混淆工具
+about: 为Rusted Warfare制作的ini混淆工具    
+    https://github.com/EElainaa/RustedWarfare_rwc
 author: By EElainaya
 
 args:
