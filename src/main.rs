@@ -34,8 +34,6 @@ fn main() ->() {
     Ok(sty)=> {bar.set_style(sty);}
     Err(err)=>{println!("{}{}","[Error]".red(),err)}
   }
-  bar.set_message("Srart...");
-  bar.finish_with_message("Done");
 
   let bar_clone = bar.clone();
 
