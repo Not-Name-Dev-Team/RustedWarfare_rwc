@@ -1,8 +1,9 @@
 
 name: rwc
 version: "1.0"
-about: 为Rusted Warfare制作的ini混淆工具    
-    https://github.com/EElainaa/RustedWarfare_rwc
+about: 为Rusted Warfare制作的ini混淆工具   
+
+    项目地址：https://github.com/EElainaa/RustedWarfare_rwc
 author: By EElainaya
 
 args:
@@ -23,13 +24,13 @@ args:
         long: version
 
     - output:
-        help: 输出文件夹路径
+        help: 指定输出文件夹路径
         short: o
         long: output
         takes_value: true
 
     - root:
-        help: 设置ROOT路径
+        help: 指定ROOT路径
         short: r
         long: root
         takes_value: true
