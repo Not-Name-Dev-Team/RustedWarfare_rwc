@@ -11,6 +11,7 @@ use std::thread;
 use std::time::Duration;
 use rand::Rng;
 use indicatif::{ProgressBar,ProgressStyle};
+use std::time::Instant;
 
 #[derive(Debug)]
 struct Unit{
@@ -26,6 +27,8 @@ struct Unit{
 }
 
 fn main() ->() {
+
+  let start_time = Instant::now();//运行起始时间
 
   let bar = ProgressBar::new_spinner();
   bar.enable_steady_tick(Duration::from_millis(1200));
@@ -83,6 +86,7 @@ fn main() ->() {
       output(&unit,&opath,&bar);
     }
     bar.println(format!("{}所有文件输出完成","[Log]".blue()));
+    bar.println(format!("共耗时{} s",start_time.elapsed().as_secs()));
     bar.finish_and_clear();
   }
 
