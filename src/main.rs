@@ -14,20 +14,18 @@ use hashbrown::*;
 use std::io::{BufRead, BufReader};
 use std::ops::{Index, IndexMut};
 
-
 fn main() ->() {
-
   let bar: ProgressBar = ProgressBar::new_spinner();
   let error_text: ColoredString="[Error]".red();
   let log_text: ColoredString="[Log]".blue();
-
+  let mut count:i32 = 0;
   let start_time = Instant::now();//运行起始时间
 
   bar.enable_steady_tick(Duration::from_millis(1200));
   
   match ProgressStyle::default_spinner().tick_strings(&[".","..","...",]).template("{prefix:.bold.dim} {spinner:.white} {msg}"){
     Ok(sty)=> {bar.set_style(sty);}
-    Err(err)=>{println!("{}",err)}
+    Err(err)=>{bar.println(format!("{}",err))}
   }
 
   let bar_clone = bar.clone();
@@ -63,48 +61,65 @@ fn main() ->() {
     
     if path.is_file(){
       match Ini::load_from_file(&path){
-        Ok(ini) => output(ini, &opath),
+        Ok(ini) => {output(ini, &opath,&bar);count+=1},
         Err(err) => bar.println(format!("{}",err)),
     }
     }else if path.is_dir() {
-      load_dir(&bar,PathBuf::from(f), root,&opath)
+      count=load_dir(&bar,PathBuf::from(f),&root,&opath)
     }else {
       bar.println(format!("{}输入文件不存在",error_text));
       return;
     }
-    bar.set_prefix("Writing");
-    bar.println(format!("{}所有文件输出完成",log_text));
-    bar.println(format!("共耗时{} s",start_time.elapsed().as_secs()));
-    bar.finish_and_clear();
+    if count>0 {
+      bar.set_prefix("Writing");
+      bar.println(format!("{}所有文件输出完成",log_text));
+      bar.println(format!("共耗时{} s",start_time.elapsed().as_secs()));
+      bar.println(format!("共处理{} 个单位",count));
+      bar.finish_and_clear();
+    }else {
+      bar.println(format!("{}无文件输出",error_text));
+      bar.println(format!("共处理{} 个单位",count));
+      bar.finish_and_clear();
+    }
+    
   }
-
-  //检测ini
 
 }
 
 //加载文件夹内ini
-fn load_dir(bar:&ProgressBar,f:PathBuf,root:PathBuf,opath:&PathBuf){
+fn load_dir(bar:&ProgressBar,f:PathBuf,root:&PathBuf,opath:&PathBuf)->i32{
+  let mut count = 0;
   bar.set_prefix("Reading ");
   for entry in walkdir::WalkDir::new(f){
     if entry.as_ref().unwrap().path().extension().eq(&Some(OsStr::new("ini"))) {
       bar.set_message(entry.as_ref().unwrap().path().to_str().unwrap().to_string());
       match Ini::load_from_file(&entry.as_ref().unwrap().path().to_path_buf()){
-        Ok(ini) => output(ini, &opath),
-        Err(err) => bar.println(format!("{}",err)),
+        Ok(mut ini) => {
+          match ini.load_copyfrom(root) {
+              Ok(_)=>{},
+              Err(err)=>{bar.println(format!("{}{} :{}","[Error]".red(),ini.path.display(),err));}
+          }
+          output(ini, &opath,bar);
+          count+=1;
+        },
+        Err(err) => {bar.println(format!("{}{}","[Error]".red(),err));},
       }
     }
   }
+  count
 }
 
-fn output(ini:Ini,opath:&PathBuf){
+fn output(ini:Ini,opath:&PathBuf,bar:&ProgressBar){
   let core=opath.join(get_name(opath).clone()+".ini");
   let data=opath.join(get_name(opath).clone());
   let conf=opath.join(get_name(opath).clone());
+  let conf_path=conf.file_name().unwrap();
+  let data_path=data.file_name().unwrap();
   if !opath.exists(){
     match create_dir_all(&opath){
       Ok(())=>{}
       Err(err)=>{
-        println!("{}{}{}","[Error]".red(),"输出文件夹创建失败",err);
+        bar.println(format!("{}{}{}","[Error]".red(),"输出文件夹创建失败",err));
       }
     }
   }
@@ -117,19 +132,19 @@ fn output(ini:Ini,opath:&PathBuf){
   let (mut core_ini,conf_ini,data_ini)=ini.code();
   let error_text: ColoredString="[Error]".red();
 
-  core_ini.set_kv("core".to_string(), "copyFrom".to_string(), "{".to_string()+data.to_str().unwrap()+","+conf.to_str().unwrap()+"}");
+  core_ini.set_kv("core".to_string(), "copyFrom".to_string(), "".to_string()+data_path.to_str().unwrap()+","+conf_path.to_str().unwrap());
 
     match write_to(&core_ini,&mut core_file.unwrap()){
     Ok(())=>{},
-      Err(err)=>{println!("{}{}",error_text,err)}
+      Err(err)=>{bar.println(format!("{}{} :{}",ini.path.display(),error_text,err))}
     };
     match write_to(&conf_ini,&mut conf_file.unwrap()){
       Ok(())=>{},
-      Err(err)=>{println!("{}{}",error_text,err)}
+      Err(err)=>{bar.println(format!("{}{} :{}",ini.path.display(),error_text,err))}
     };
     match write_to(&data_ini,&mut data_file.unwrap()){
       Ok(())=>{},
-      Err(err)=>{println!("{}{}",error_text,err)}
+      Err(err)=>{bar.println(format!("{}{} :{}",ini.path.display(),error_text,err))}
     };
 }
 
@@ -206,18 +221,18 @@ impl Ini {
                                             linecount+=1;
                                         }
                                         LineType::KV => {
-                                            let sp: Vec<&str> = line.split(":").collect();
-                                            if sp[1].starts_with("\"\"\"") {
+                                            let (k,v) = line.split_once(":").unwrap();
+                                            if v.starts_with("\"\"\"") {
                                                 //开始
-                                                if sp[1].len() >= 6 && sp[1].ends_with("\"\"\"") {
-                                                    m.addkv(sp[0].to_string(), sp[1].to_string())
+                                                if v.len() >= 6 && v.ends_with("\"\"\"") {
+                                                    m.addkv(k.to_string(), v.to_string())
                                                 } else {
                                                     m.turn();
-                                                    m.setstrname(sp[0].to_string());
-                                                    m.setstr(sp[1].to_string()) //开始记录原始字符串
+                                                    m.setstrname(k.to_string());
+                                                    m.setstr(v.to_string()) //开始记录原始字符串
                                                 }
                                             } else {
-                                                m.addkv(sp[0].to_string(), sp[1].to_string());
+                                                m.addkv(k.to_string(), v.to_string());
                                             }
                                             linecount+=1;
                                         }
@@ -234,7 +249,7 @@ impl Ini {
                                         LineType::EMPTY => {linecount+=1;}
                                         LineType::UNKNOW => {
                                           linecount+=1;
-                                            return Err(format!("{}:文件第{}行格式错误",path.display(),linecount));
+                                            return Err(format!("{}:第{}行格式错误",path.display(),linecount));
                                             
                                         }
                                     }
@@ -243,7 +258,6 @@ impl Ini {
                                     //原始字符串记录
                                     m.setstr(m.getstr() + "\n" + &line);
                                     if line.ends_with("\"\"\"") {
-                                        //println!("原始字符串结束");
                                         m.addkv(m.getstrname(), m.getstr());
                                         m.clearstr();
                                         m.turn();
@@ -253,7 +267,7 @@ impl Ini {
                             }
                         }
                         Err(_) => {
-                            println!("Error")
+                            
                         }
                     }
                 }
@@ -374,16 +388,21 @@ impl Ini {
         };
         (core_ini, conf_ini, data_ini)
     }
+
     fn load_copyfrom(&mut self,root:&PathBuf)->Result<(), String> {
-        if !&self["core".to_string()]["copyFrom"].is_empty() {
+      let sec;
+      if let Some(s)=self.data.get("core") {
+        sec=s;
+      }else {
+          return Ok(());
+      }
+        if sec.contains_key("copyFrom") {
           let copy_from=self["core".to_string()]["copyFrom"].split(",");
           let mut total_ini = Ini::new();
           for path in copy_from {
             let input:PathBuf;
             let mut tmp = String::from(path);
-            while tmp.starts_with(" ") {
-              tmp = tmp[1..].to_string();
-            }
+            tmp=tmp.trim().to_string();
             if tmp.starts_with("ROOT:") {
               input = root.join(tmp.replace("\n", "\\n").replace("ROOT:/", "").replace("ROOT:", ""));
             }else{
@@ -399,14 +418,19 @@ impl Ini {
                 },
                 Err(err) => {return Err(err);},
             }
-            if total_ini.data.get("core").unwrap().contains_key("copyFrom") {
-                match total_ini.load_copyfrom(root) {
-                    Ok(_) => {},
-                    Err(err) => {
+            match total_ini.data.get("core") {
+                Some(sec) => {
+                  if sec.contains_key("copyFrom") {
+                    match total_ini.load_copyfrom(root) {
+                      Ok(_) => {},
+                      Err(err) => {
                         return Err(err);
-                    },
-                } ;
-                total_ini.data.get_mut("core").unwrap().remove("coopyFrom");
+                      },
+                    }
+                  total_ini.data.get_mut("core").unwrap().remove("coopyFrom");
+                  }
+                },
+                None => {},
             }
           }
           for (sname,sec) in total_ini.data{
@@ -414,6 +438,7 @@ impl Ini {
               self.set_kv(sname.clone(), k.clone(), v.clone());
             }
           }
+          self["core".to_string()].remove("dont_load");
           return Ok(());
         }else{
           self["core".to_string()].remove("dont_load");
