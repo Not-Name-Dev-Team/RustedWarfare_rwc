@@ -34,7 +34,6 @@ fn main() ->() {
     loop {
         bar_clone.inc(1);
     }
-    
   });
 
   let yml = load_yaml!("yaml.yml");//使用load_yaml宏读取yaml.yml内的内容
@@ -68,22 +67,24 @@ fn main() ->() {
       count=load_dir(&bar,PathBuf::from(f),&root,&opath)
     }else {
       bar.println(format!("{}输入文件不存在",error_text));
+        bar.finish_and_clear();
       return;
     }
-    if count>0 {
-      bar.set_prefix("Writing");
-      bar.println(format!("{}所有文件输出完成",log_text));
-      bar.println(format!("共耗时{} s",start_time.elapsed().as_secs()));
-      bar.println(format!("共处理{} 个单位",count));
+  }else {
+      bar.println(format!("{}无文件输入,请使用 rwc -h 查询使用方法",error_text));
       bar.finish_and_clear();
-    }else {
-      bar.println(format!("{}无文件输出",error_text));
-      bar.println(format!("共处理{} 个单位",count));
-      bar.finish_and_clear();
-    }
-    
+      return;
   }
-
+    if count>0 {
+        bar.println(format!("{}所有文件输出完成",log_text));
+        bar.println(format!("共耗时{} s",start_time.elapsed().as_secs()));
+        bar.println(format!("共处理{} 个单位",count));
+        bar.finish_and_clear();
+    }else {
+        bar.println(format!("{}无文件输出",error_text));
+        bar.println(format!("共处理{} 个单位",count));
+        bar.finish_and_clear();
+    }
 }
 
 //加载文件夹内ini
@@ -91,10 +92,19 @@ fn load_dir(bar:&ProgressBar,f:PathBuf,root:&PathBuf,opath:&PathBuf)->i32{
   let mut count = 0;
   bar.set_prefix("Reading ");
   for entry in walkdir::WalkDir::new(f){
-    if entry.as_ref().unwrap().path().extension().eq(&Some(OsStr::new("ini"))) {
+    let path = entry.as_ref().unwrap().path();
+    if path.extension().eq(&Some(OsStr::new("ini"))) {
       bar.set_message(entry.as_ref().unwrap().path().to_str().unwrap().to_string());
       match Ini::load_from_file(&entry.as_ref().unwrap().path().to_path_buf()){
         Ok(mut ini) => {
+          if let Some(s) = ini.data.get("core") {
+              if let Some(k) = s.get("dont_load"){
+                if k.trim()=="true" {
+                  bar.println(format!("{}{} 含有dont_load:true，跳过此文件","[Log]".blue(),path.display()));
+                    continue;//不加载的ini 跳过
+                }
+              }
+          }
           match ini.load_copyfrom(root) {
               Ok(_)=>{},
               Err(err)=>{bar.println(format!("{}{} :{}","[Error]".red(),ini.path.display(),err));}
@@ -134,6 +144,7 @@ fn output(ini:Ini,opath:&PathBuf,bar:&ProgressBar){
 
   core_ini.set_kv("core".to_string(), "copyFrom".to_string(), "".to_string()+data_path.to_str().unwrap()+","+conf_path.to_str().unwrap());
 
+    bar.set_prefix("Writing");
     match write_to(&core_ini,&mut core_file.unwrap()){
     Ok(())=>{},
       Err(err)=>{bar.println(format!("{}{} :{}",ini.path.display(),error_text,err))}
@@ -249,7 +260,7 @@ impl Ini {
                                         LineType::EMPTY => {linecount+=1;}
                                         LineType::UNKNOW => {
                                           linecount+=1;
-                                            return Err(format!("{}:第{}行格式错误",path.display(),linecount));
+                                            return Err(format!("{} :第{}行格式错误",path.display(),linecount));
                                             
                                         }
                                     }
@@ -279,9 +290,9 @@ impl Ini {
                 return Ok(Ini {path: path.to_path_buf(), data, ppath: p });
             }
             Err(_) => {
-                return Err(String::from(format!("打开文件{}失败",path.display())));
+                return Err(String::from(format!("打开文件 {} 失败",path.display())));
             }
-        }
+      }
     }
     fn code(&self) -> (Ini, Ini, Ini) {
         let mut core_ini = Ini::new();
@@ -399,6 +410,7 @@ impl Ini {
         if sec.contains_key("copyFrom") {
           let copy_from=self["core".to_string()]["copyFrom"].split(",");
           let mut total_ini = Ini::new();
+          //total_ini.ppath.pop();
           for path in copy_from {
             let input:PathBuf;
             let mut tmp = String::from(path);
@@ -408,8 +420,10 @@ impl Ini {
             }else{
               input = self.ppath.join(tmp.replace("\n", "\\n").replace("ROOT:/", "").replace("ROOT:", ""));
             }
+            total_ini.ppath=self.ppath.clone();
               match Ini::load_from_file(&input) {
                 Ok(ini) => {
+                  total_ini.ppath=ini.ppath.clone();
                     for (sname,sec) in &ini.data{
                         for (k,v) in sec{
                             total_ini.set_kv(sname.clone(), k.clone(), v.clone());
