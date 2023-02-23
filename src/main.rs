@@ -90,6 +90,7 @@ fn main() ->() {
 //加载文件夹内ini
 fn load_dir(bar:&ProgressBar,f:PathBuf,root:&PathBuf,opath:&PathBuf)->i32{
   let mut count = 0;
+  let log_text: ColoredString="[Log]".blue();
   bar.set_prefix("Reading ");
   for entry in walkdir::WalkDir::new(f){
     let path = entry.as_ref().unwrap().path();
@@ -98,11 +99,9 @@ fn load_dir(bar:&ProgressBar,f:PathBuf,root:&PathBuf,opath:&PathBuf)->i32{
       match Ini::load_from_file(&entry.as_ref().unwrap().path().to_path_buf()){
         Ok(mut ini) => {
           if let Some(s) = ini.data.get("core") {
-              if let Some(k) = s.get("dont_load"){
-                if k.trim()=="true" {
-                  bar.println(format!("{}{} 含有dont_load:true，跳过此文件","[Log]".blue(),path.display()));
-                    continue;//不加载的ini 跳过
-                }
+              if s.contains_key("dont_load"){
+                  bar.println(format!("{}{} 含有dont_load:true，跳过此文件",log_text,path.display()));
+                  continue;//不加载的ini 跳过
               }
           }
           match ini.load_copyfrom(root) {
