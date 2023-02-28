@@ -9,5 +9,4 @@ colored = "2.0.0"
 walkdir = "2.3.2"
 rand = "*"
 indicatif = "0.17.2"
-rayon = "*"
-hashbrown = { version = "*", features = ["rayon"] }
+hashbrown = "*"
