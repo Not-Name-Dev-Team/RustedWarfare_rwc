@@ -10,3 +10,7 @@ walkdir = "2.3.2"
 rand = "*"
 indicatif = "0.17.2"
 hashbrown = "*"
+
+[profile.release]
+opt-level = 'z'
+lto = true
