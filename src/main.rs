@@ -226,7 +226,7 @@ impl Ini {
                             match &m.mode {
                                 Mode::COM => {
                                     //普通
-                                    match gettype(&line) {
+                                    match m.gettype(&line) {
                                         LineType::STR => {
                                             linecount+=1;
                                         }
@@ -250,7 +250,7 @@ impl Ini {
                                             //此行是section
                                             if !&m.getsname().is_empty() {
                                                 //此前存在section
-                                                data.insert(m.getsname(), m.getsection());
+                                                  data.insert(m.getsname(), m.getsection());
                                             }
                                             m.clearsection();
                                             m.setsname(line[1..line.len() - 1].to_string());
@@ -505,20 +505,7 @@ enum Mode {
     STR,
 }
 
-fn gettype(line: &String) -> LineType {
-  let line = line.trim();
-    if line.starts_with("[") {
-        LineType::SECTION
-    } else if line.contains(":") {
-        LineType::KV
-    } else if line.is_empty() || line.eq("") || line.replace(" ", "").is_empty() {
-        LineType::EMPTY
-    } else if line.ends_with("\"\"\"")||line.starts_with("#") {
-        LineType::STR
-    } else {
-        LineType::UNKNOW
-    }
-}
+
 
 struct Temp {
     mode: Mode,
@@ -529,6 +516,22 @@ struct Temp {
 }
 
 impl Temp {
+
+  fn gettype(&self,line: &String) -> LineType {
+    let line = line.trim();
+      if line.starts_with("[") {
+          LineType::SECTION
+      } else if line.contains(":") {
+          LineType::KV
+      } else if line.is_empty() || line.eq("") || line.replace(" ", "").is_empty() {
+          LineType::EMPTY
+      } else if line.ends_with("\"\"\"")||line.starts_with("#")||self.getsname().starts_with("comment_") {
+          LineType::STR
+      } else {
+          LineType::UNKNOW
+      }
+  }
+
     fn turn(&mut self) {
         match self.mode {
             Mode::COM => self.mode = Mode::STR,
