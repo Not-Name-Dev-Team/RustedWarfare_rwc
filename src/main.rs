@@ -4,7 +4,7 @@ use rand::rngs::ThreadRng;
 use std::ffi::OsStr;
 use std::io::{Write, self};
 use std::path::PathBuf;
-use std::fs::{create_dir_all, OpenOptions, File};
+use std::fs::{create_dir_all, OpenOptions, File, copy};
 use std::thread;
 use std::time::Duration;
 use rand::Rng;
@@ -60,7 +60,7 @@ fn main() ->() {
     
     if path.is_file(){
       match Ini::load_from_file(&path){
-        Ok(ini) => {output(ini, &opath,&bar);count+=1},
+        Ok(ini) => {output(ini,&root,&opath,&bar);count+=1},
         Err(err) => bar.println(format!("{}",err)),
     }
     }else if path.is_dir() {
@@ -108,7 +108,7 @@ fn load_dir(bar:&ProgressBar,f:PathBuf,root:&PathBuf,opath:&PathBuf)->i32{
               Ok(_)=>{},
               Err(err)=>{bar.println(format!("{}{} :{}","[Error]".red(),ini.path.display(),err));}
           }
-          output(ini, &opath,bar);
+          output(ini, root,&opath,bar);
           count+=1;
         },
         Err(err) => {bar.println(format!("{}{}","[Error]".red(),err));},
@@ -118,7 +118,7 @@ fn load_dir(bar:&ProgressBar,f:PathBuf,root:&PathBuf,opath:&PathBuf)->i32{
   count
 }
 
-fn output(ini:Ini,opath:&PathBuf,bar:&ProgressBar){
+fn output(ini:Ini,root:&PathBuf,opath:&PathBuf,bar:&ProgressBar){
   let core=opath.join(get_name(opath).clone()+".ini");
   let data=opath.join(get_name(opath).clone());
   let conf=opath.join(get_name(opath).clone());
@@ -138,7 +138,7 @@ fn output(ini:Ini,opath:&PathBuf,bar:&ProgressBar){
   let data_file = OpenOptions::new().read(true).write(true).append(false).create(true).open(&data);
   let conf_file = OpenOptions::new().read(true).write(true).append(false).create(true).open(&conf);
 
-  let (mut core_ini,conf_ini,data_ini)=ini.code();
+  let (mut core_ini,conf_ini,data_ini)=ini.code(bar,root,opath);
   let error_text: ColoredString="[Error]".red();
 
   core_ini.set_kv("core".to_string(), "copyFrom".to_string(), "".to_string()+data_path.to_str().unwrap()+","+conf_path.to_str().unwrap());
@@ -213,7 +213,7 @@ impl Ini {
               let mut linecount = 0;
                 let br = BufReader::new(file);
                 let mut data: HashMap<String, HashMap<String, String>> = HashMap::new();
-                let mut m = Temp {
+                let mut m = Tmp {
                     mode: Mode::COM,
                     st: String::from(""),
                     section_name: String::from(""),
@@ -293,7 +293,7 @@ impl Ini {
             }
       }
     }
-    fn code(&self) -> (Ini, Ini, Ini) {
+    fn code(&self,bar:&ProgressBar,root:&PathBuf,opath:&PathBuf) -> (Ini, Ini, Ini) {
         let mut core_ini = Ini::new();
         let mut conf_ini = Ini::new();
         let mut data_ini = Ini::new();
@@ -301,8 +301,7 @@ impl Ini {
             for (k, v) in sec.1 {
                 //过滤不能使用$的键
                 match &k[..] {
-                    "image"
-                    | "name"
+                    "name"
                     | "copyFrom"
                     | "altNames"
                     | "class"
@@ -361,6 +360,47 @@ impl Ini {
                                 //不存在节
                                 let mut s: HashMap<String, String> = HashMap::new();
                                 s.insert(k.to_string(), v.to_string());
+                                core_ini.data.insert(sec.0.to_string(), s); //创建节
+                                continue;
+                            }
+                        }
+                      },
+                      //将图片复制到输出路径
+                      "image"|"image_wreak"|"image_turret"|"image_shadow"|"image_back"=>{
+                        let image_opath = opath.join(get_name(opath));
+                        let v=v.trim();
+                        let image_path = if v.starts_with("ROOT:") {
+                          root.join(v.replace("\n", "\\n").replace("ROOT:/", "").replace("ROOT:", ""))
+                        }else if v.starts_with("SHARED:") |v.starts_with("SHADOW:")| v.to_uppercase().eq("NONE") | v.to_uppercase().eq("AUTO") {
+                          match core_ini.data.get_mut(sec.0) {
+                            Some(s) => {
+                                s.insert(k.clone(), v.to_string());
+                                continue;
+                            }
+                            None => {
+                                //不存在节
+                                let mut s: HashMap<String, String> = HashMap::new();
+                                s.insert(k.to_string(), v.to_string());
+                                core_ini.data.insert(sec.0.to_string(), s); //创建节
+                                continue;
+                            }
+                        }
+                        }else{
+                          self.ppath.join(v.replace("\n", "\\n").replace("ROOT:/", "").replace("ROOT:", ""))
+                        };
+                        match copy(&image_path, &image_opath){
+                            Ok(_) => {}//bar.println(format!("{}{} -> {}","[Log]".blue(),image_path.display(),image_opath.display()))},
+                            Err(_) => {bar.println(format!("{}复制 {} 失败","[Error]".red(),image_path.display()));break;},//文件复制失败
+                        }
+                        match core_ini.data.get_mut(sec.0) {
+                            Some(s) => {
+                                s.insert(k.clone(), image_opath.file_name().unwrap().to_string_lossy().to_string());
+                                continue;
+                            }
+                            None => {
+                                //不存在节
+                                let mut s: HashMap<String, String> = HashMap::new();
+                                s.insert(k.to_string(), image_opath.file_name().unwrap().to_string_lossy().to_string());
                                 core_ini.data.insert(sec.0.to_string(), s); //创建节
                                 continue;
                             }
@@ -507,7 +547,7 @@ enum Mode {
 
 
 
-struct Temp {
+struct Tmp {
     mode: Mode,
     st: String,
     stname: String,
@@ -515,7 +555,7 @@ struct Temp {
     section: HashMap<String, String>,
 }
 
-impl Temp {
+impl Tmp {
 
   fn gettype(&self,line: &String) -> LineType {
     let line = line.trim();
