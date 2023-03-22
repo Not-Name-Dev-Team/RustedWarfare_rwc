@@ -1,10 +1,12 @@
 use clap::{App, load_yaml};
 use colored::*;
 use rand::rngs::ThreadRng;
+use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
 use std::ffi::OsStr;
 use std::io::{Write, self};
 use std::path::PathBuf;
 use std::fs::{create_dir_all, OpenOptions, File, copy};
+use std::sync::{Mutex, Arc};
 use std::thread;
 use std::time::Duration;
 use rand::Rng;
@@ -89,19 +91,24 @@ fn main() ->() {
 
 //加载文件夹内ini
 fn load_dir(bar:&ProgressBar,f:PathBuf,root:&PathBuf,opath:&PathBuf)->i32{
-  let mut count = 0;
+  let count = Arc::new(Mutex::new(0));
+  let _count = count.clone();
   let log_text: ColoredString="[Log]".blue();
-  bar.set_prefix("Reading ");
+
+  let mut paths:Vec<PathBuf> =vec![];
   for entry in walkdir::WalkDir::new(f){
-    let path = entry.as_ref().unwrap().path();
+    paths.push(entry.unwrap().path().to_path_buf())
+  }
+  //多线程处理
+  paths.par_iter().for_each(|path|{
     if path.extension().eq(&Some(OsStr::new("ini"))) {
-      bar.set_message(entry.as_ref().unwrap().path().to_str().unwrap().to_string());
-      match Ini::load_from_file(&entry.as_ref().unwrap().path().to_path_buf()){
+      bar.set_message(path.to_string_lossy().to_string());
+      match Ini::load_from_file(&path.to_path_buf()){
         Ok(mut ini) => {
           if let Some(s) = ini.data.get("core") {
               if s.contains_key("dont_load"){
                   bar.println(format!("{}{} 含有dont_load:true，跳过此文件",log_text,path.display()));
-                  continue;//不加载的ini 跳过
+                  //continue;//不加载的ini 跳过
               }
           }
           match ini.load_copyfrom(root) {
@@ -109,12 +116,13 @@ fn load_dir(bar:&ProgressBar,f:PathBuf,root:&PathBuf,opath:&PathBuf)->i32{
               Err(err)=>{bar.println(format!("{}{} :{}","[Error]".red(),ini.path.display(),err));}
           }
           output(ini, root,&opath,bar);
-          count+=1;
+          *count.lock().unwrap()+=1
         },
         Err(err) => {bar.println(format!("{}{}","[Error]".red(),err));},
       }
     }
-  }
+  });
+  let count = *count.lock().unwrap();
   count
 }
 
@@ -223,14 +231,15 @@ impl Ini {
                 for l in br.lines() {
                     match l {
                         Ok(line) => {
+                          use Mode::*;
                             match &m.mode {
-                                Mode::COM => {
-                                    //普通
+                                COM => {//普通
+                                    use LineType::*;
                                     match m.gettype(&line) {
-                                        LineType::STR => {
+                                        STR => {
                                             linecount+=1;
                                         }
-                                        LineType::KV => {
+                                        KV => {
                                             let (k,v) = line.split_once(":").unwrap();
                                             if v.starts_with("\"\"\"") {
                                                 //开始
@@ -246,7 +255,7 @@ impl Ini {
                                             }
                                             linecount+=1;
                                         }
-                                        LineType::SECTION => {
+                                        SECTION => {
                                             //此行是section
                                             if !&m.getsname().is_empty() {
                                                 //此前存在section
@@ -256,15 +265,14 @@ impl Ini {
                                             m.setsname(line[1..line.len() - 1].to_string());
                                             linecount+=1;
                                         }
-                                        LineType::EMPTY => {linecount+=1;}
-                                        LineType::UNKNOW => {
+                                        EMPTY => {linecount+=1;}
+                                        UNKNOW => {
                                           linecount+=1;
                                             return Err(format!("{} :第{}行格式错误",path.display(),linecount));
-                                            
                                         }
                                     }
                                 }
-                                Mode::STR => {
+                                STR => {
                                     //原始字符串记录
                                     m.setstr(m.getstr() + "\n" + &line);
                                     if line.ends_with("\"\"\"") {
