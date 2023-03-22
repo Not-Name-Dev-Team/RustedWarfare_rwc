@@ -108,7 +108,7 @@ fn load_dir(bar:&ProgressBar,f:PathBuf,root:&PathBuf,opath:&PathBuf)->i32{
           if let Some(s) = ini.data.get("core") {
               if s.contains_key("dont_load"){
                   bar.println(format!("{}{} 含有dont_load:true，跳过此文件",log_text,path.display()));
-                  //continue;//不加载的ini 跳过
+                  return;//不加载的ini 跳过
               }
           }
           match ini.load_copyfrom(root) {
