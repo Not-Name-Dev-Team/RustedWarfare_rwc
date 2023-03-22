@@ -7,36 +7,17 @@ use std::io::{Write, self};
 use std::path::PathBuf;
 use std::fs::{create_dir_all, OpenOptions, File, copy};
 use std::sync::{Mutex, Arc};
-use std::thread;
-use std::time::Duration;
 use rand::Rng;
-use indicatif::{ProgressBar,ProgressStyle};
 use std::time::Instant;
 use hashbrown::*;
 use std::io::{BufRead, BufReader};
 use std::ops::{Index, IndexMut};
 
 fn main() ->() {
-  let bar: ProgressBar = ProgressBar::new_spinner();
   let error_text: ColoredString="[Error]".red();
   let log_text: ColoredString="[Log]".blue();
   let mut count:i32 = 0;
   let start_time = Instant::now();//运行起始时间
-
-  bar.enable_steady_tick(Duration::from_millis(1200));
-  
-  match ProgressStyle::default_spinner().tick_strings(&[".","..","...",]).template("{prefix:.bold.dim} {spinner:.white} {msg}"){
-    Ok(sty)=> {bar.set_style(sty);}
-    Err(err)=>{bar.println(format!("{}",err))}
-  }
-
-  let bar_clone = bar.clone();
-
-  thread::spawn(move || {
-    loop {
-        bar_clone.inc(1);
-    }
-  });
 
   let yml = load_yaml!("yaml.yml");//使用load_yaml宏读取yaml.yml内的内容
   let matches = App::from_yaml(yml).get_matches();
@@ -62,35 +43,34 @@ fn main() ->() {
     
     if path.is_file(){
       match Ini::load_from_file(&path){
-        Ok(ini) => {output(ini,&root,&opath,&bar);count+=1},
-        Err(err) => bar.println(format!("{}",err)),
+        Ok(ini) => {
+          output(ini,&root,&opath);
+          count+=1},
+        Err(err) => println!("{}",err)
     }
     }else if path.is_dir() {
-      count=load_dir(&bar,PathBuf::from(f),&root,&opath)
+      count=load_dir(PathBuf::from(f),&root,&opath)
     }else {
-      bar.println(format!("{}输入文件不存在",error_text));
-        bar.finish_and_clear();
+      println!("{}输入文件不存在",error_text);
       return;
+      
     }
   }else {
-      bar.println(format!("{}无文件输入,请使用 rwc -h 查询使用方法",error_text));
-      bar.finish_and_clear();
+    println!("{}无文件输入,请使用 rwc -h 查询使用方法",error_text);
       return;
   }
     if count>0 {
-        bar.println(format!("{}所有文件输出完成",log_text));
-        bar.println(format!("共耗时{} s",start_time.elapsed().as_secs()));
-        bar.println(format!("共处理{} 个单位",count));
-        bar.finish_and_clear();
+        println!("{}所有文件输出完成",log_text);
+        println!("共耗时{} s",start_time.elapsed().as_secs());
+        println!("共处理{} 个单位",count)
     }else {
-        bar.println(format!("{}无文件输出",error_text));
-        bar.println(format!("共处理{} 个单位",count));
-        bar.finish_and_clear();
+        println!("{}无文件输出",error_text);
+        println!("共处理{} 个单位",count)
     }
 }
 
 //加载文件夹内ini
-fn load_dir(bar:&ProgressBar,f:PathBuf,root:&PathBuf,opath:&PathBuf)->i32{
+fn load_dir(f:PathBuf,root:&PathBuf,opath:&PathBuf)->i32{
   let count = Arc::new(Mutex::new(0));
   let _count = count.clone();
   let log_text: ColoredString="[Log]".blue();
@@ -102,23 +82,22 @@ fn load_dir(bar:&ProgressBar,f:PathBuf,root:&PathBuf,opath:&PathBuf)->i32{
   //多线程处理
   paths.par_iter().for_each(|path|{
     if path.extension().eq(&Some(OsStr::new("ini"))) {
-      bar.set_message(path.to_string_lossy().to_string());
       match Ini::load_from_file(&path.to_path_buf()){
         Ok(mut ini) => {
           if let Some(s) = ini.data.get("core") {
               if s.contains_key("dont_load"){
-                  bar.println(format!("{}{} 含有dont_load:true，跳过此文件",log_text,path.display()));
+                  println!("{}{} 含有dont_load:true，跳过此文件",log_text,path.display());
                   return;//不加载的ini 跳过
               }
           }
           match ini.load_copyfrom(root) {
               Ok(_)=>{},
-              Err(err)=>{bar.println(format!("{}{} :{}","[Error]".red(),ini.path.display(),err));}
+              Err(err)=>{println!("{}{} :{}","[Error]".red(),ini.path.display(),err)}
           }
-          output(ini, root,&opath,bar);
+          output(ini, root,&opath);
           *count.lock().unwrap()+=1
         },
-        Err(err) => {bar.println(format!("{}{}","[Error]".red(),err));},
+        Err(err) => {println!("{}{}","[Error]".red(),err)}
       }
     }
   });
@@ -126,7 +105,7 @@ fn load_dir(bar:&ProgressBar,f:PathBuf,root:&PathBuf,opath:&PathBuf)->i32{
   count
 }
 
-fn output(ini:Ini,root:&PathBuf,opath:&PathBuf,bar:&ProgressBar){
+fn output(ini:Ini,root:&PathBuf,opath:&PathBuf){
   let core=opath.join(get_name(opath).clone()+".ini");
   let data=opath.join(get_name(opath).clone());
   let conf=opath.join(get_name(opath).clone());
@@ -136,7 +115,7 @@ fn output(ini:Ini,root:&PathBuf,opath:&PathBuf,bar:&ProgressBar){
     match create_dir_all(&opath){
       Ok(())=>{}
       Err(err)=>{
-        bar.println(format!("{}{}{}","[Error]".red(),"输出文件夹创建失败",err));
+        println!("{}{}{}","[Error]".red(),"输出文件夹创建失败",err);
       }
     }
   }
@@ -146,23 +125,22 @@ fn output(ini:Ini,root:&PathBuf,opath:&PathBuf,bar:&ProgressBar){
   let data_file = OpenOptions::new().read(true).write(true).append(false).create(true).open(&data);
   let conf_file = OpenOptions::new().read(true).write(true).append(false).create(true).open(&conf);
 
-  let (mut core_ini,conf_ini,data_ini)=ini.code(bar,root,opath);
+  let (mut core_ini,conf_ini,data_ini)=ini.code(root,opath);
   let error_text: ColoredString="[Error]".red();
 
   core_ini.set_kv("core".to_string(), "copyFrom".to_string(), "".to_string()+data_path.to_str().unwrap()+","+conf_path.to_str().unwrap());
 
-    bar.set_prefix("Writing");
     match write_to(&core_ini,&mut core_file.unwrap()){
     Ok(())=>{},
-      Err(err)=>{bar.println(format!("{}{} :{}",ini.path.display(),error_text,err))}
+      Err(err)=>{println!("{}{} :{}",ini.path.display(),error_text,err)}
     };
     match write_to(&conf_ini,&mut conf_file.unwrap()){
       Ok(())=>{},
-      Err(err)=>{bar.println(format!("{}{} :{}",ini.path.display(),error_text,err))}
+      Err(err)=>{println!("{}{} :{}",ini.path.display(),error_text,err)}
     };
     match write_to(&data_ini,&mut data_file.unwrap()){
       Ok(())=>{},
-      Err(err)=>{bar.println(format!("{}{} :{}",ini.path.display(),error_text,err))}
+      Err(err)=>{println!("{}{} :{}",ini.path.display(),error_text,err)}
     };
 }
 
@@ -301,7 +279,7 @@ impl Ini {
             }
       }
     }
-    fn code(&self,bar:&ProgressBar,root:&PathBuf,opath:&PathBuf) -> (Ini, Ini, Ini) {
+    fn code(&self,root:&PathBuf,opath:&PathBuf) -> (Ini, Ini, Ini) {
         let mut core_ini = Ini::new();
         let mut conf_ini = Ini::new();
         let mut data_ini = Ini::new();
@@ -397,8 +375,8 @@ impl Ini {
                           self.ppath.join(v.replace("\n", "\\n").replace("ROOT:/", "").replace("ROOT:", ""))
                         };
                         match copy(&image_path, &image_opath){
-                            Ok(_) => {}//bar.println(format!("{}{} -> {}","[Log]".blue(),image_path.display(),image_opath.display()))},
-                            Err(_) => {bar.println(format!("{}复制 {} 失败","[Error]".red(),image_path.display()));break;},//文件复制失败
+                            Ok(_) => {}
+                            Err(_) => {println!("{}复制 {} 失败","[Error]".red(),image_path.display());break;}
                         }
                         match core_ini.data.get_mut(sec.0) {
                             Some(s) => {
@@ -457,7 +435,6 @@ impl Ini {
         if sec.contains_key("copyFrom") {
           let copy_from=self["core".to_string()]["copyFrom"].split(",");
           let mut total_ini = Ini::new();
-          //total_ini.ppath.pop();
           for path in copy_from {
             let input:PathBuf;
             let mut tmp = String::from(path);
@@ -505,7 +482,6 @@ impl Ini {
           self["core".to_string()].remove("dont_load");
           return Ok(())
         };
-        //self.set_kv("core".to_string(), "dont_load".to_string(), "false".to_string())
     }
     fn set_kv(&mut self, name: String, k: String, v: String) {
       match self.data.get_mut(&name) {
