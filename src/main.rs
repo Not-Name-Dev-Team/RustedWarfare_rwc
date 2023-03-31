@@ -6,14 +6,24 @@ use std::ffi::OsStr;
 use std::io::{Write, self};
 use std::path::PathBuf;
 use std::fs::{create_dir_all, OpenOptions, File, copy};
+use std::process::exit;
 use std::sync::{Mutex, Arc};
 use rand::Rng;
-use std::time::Instant;
+use std::time::{Instant, Duration};
 use hashbrown::*;
 use std::io::{BufRead, BufReader};
 use std::ops::{Index, IndexMut};
+use pcre2::bytes::*;
 
-fn main() ->() {
+macro_rules! time {
+  ($time:expr) => {
+      {
+        if $time.elapsed() < Duration::new(1, 0) { format!("{} ms",$time.elapsed().as_millis()) } else { format!("{} s",$time.elapsed().as_secs()) }
+      }
+  };
+}
+
+fn main() {
   let error_text: ColoredString="[Error]".red();
   let log_text: ColoredString="[Log]".blue();
   let mut count:i32 = 0;
@@ -24,6 +34,14 @@ fn main() ->() {
 
   let mut opath= PathBuf::from("./output");
   let root:PathBuf;
+
+  /*let regex = Regex::new(r#"\$\{.{0,}\}"#).unwrap().captures(b"${aaaabbbbczz.aabiiilll}");
+  match regex {
+    Ok(Some(a)) =>println!("{}",std::str::from_utf8(a.get(0).unwrap().as_bytes()).unwrap()),
+    Ok(None) => println!("NONE"),
+    Err(_) => exit(0),
+  }
+  return;*/
 
   if let Some(o) = matches.value_of("output") {//获取opath为--output参数
     opath = PathBuf::from(o);
@@ -44,33 +62,42 @@ fn main() ->() {
     if path.is_file(){
       match Ini::load_from_file(&path){
         Ok(ini) => {
-          output(ini,&root,&opath);
+          println!("{:?}",ini);
+          let mut random:ThreadRng = rand::thread_rng();
+          match output(ini,&root,&opath,&mut random) {
+            Ok(_) => {},
+            Err(err) => println!("{}",err),
+        }
           count+=1},
         Err(err) => println!("{}",err)
-    }
+      }
     }else if path.is_dir() {
       count=load_dir(PathBuf::from(f),&root,&opath)
     }else {
       println!("{}输入文件不存在",error_text);
-      return;
+      exit(0);
       
     }
   }else {
     println!("{}无文件输入,请使用 rwc -h 查询使用方法",error_text);
-      return;
+    exit(0);
   }
     if count>0 {
         println!("{}所有文件输出完成",log_text);
-        println!("共耗时{} s",start_time.elapsed().as_secs());
+        println!("共耗时{}",time!(start_time));
         println!("共处理{} 个单位",count)
     }else {
         println!("{}无文件输出",error_text);
         println!("共处理{} 个单位",count)
     }
+    
 }
+
+
 
 //加载文件夹内ini
 fn load_dir(f:PathBuf,root:&PathBuf,opath:&PathBuf)->i32{
+  
   let count = Arc::new(Mutex::new(0));
   let _count = count.clone();
   let log_text: ColoredString="[Log]".blue();
@@ -81,6 +108,7 @@ fn load_dir(f:PathBuf,root:&PathBuf,opath:&PathBuf)->i32{
   }
   //多线程处理
   paths.par_iter().for_each(|path|{
+    
     if path.extension().eq(&Some(OsStr::new("ini"))) {
       match Ini::load_from_file(&path.to_path_buf()){
         Ok(mut ini) => {
@@ -94,7 +122,11 @@ fn load_dir(f:PathBuf,root:&PathBuf,opath:&PathBuf)->i32{
               Ok(_)=>{},
               Err(err)=>{println!("{}{} :{}","[Error]".red(),ini.path.display(),err)}
           }
-          output(ini, root,&opath);
+          let mut random:ThreadRng = rand::thread_rng();
+          match output(ini, root,&opath,&mut random){
+            Ok(_) => {},
+            Err(err) => println!("{}",err),
+        };
           *count.lock().unwrap()+=1
         },
         Err(err) => {println!("{}{}","[Error]".red(),err)}
@@ -105,17 +137,17 @@ fn load_dir(f:PathBuf,root:&PathBuf,opath:&PathBuf)->i32{
   count
 }
 
-fn output(ini:Ini,root:&PathBuf,opath:&PathBuf){
-  let core=opath.join(get_name(opath).clone()+".ini");
-  let data=opath.join(get_name(opath).clone());
-  let conf=opath.join(get_name(opath).clone());
+fn output(mut ini:Ini,root:&PathBuf,opath:&PathBuf,random:&mut ThreadRng) -> Result<(),String>{
+  let core=opath.join(get_name(opath,random).clone()+".ini");
+  let data=opath.join(get_name(opath,random).clone());
+  let conf=opath.join(get_name(opath,random).clone());
   let conf_path=conf.file_name().unwrap();
   let data_path=data.file_name().unwrap();
   if !opath.exists(){
     match create_dir_all(&opath){
       Ok(())=>{}
       Err(err)=>{
-        println!("{}{}{}","[Error]".red(),"输出文件夹创建失败",err);
+        return Err(format!("{}{}{}","[Error]".red(),"输出文件夹创建失败",err));
       }
     }
   }
@@ -125,23 +157,24 @@ fn output(ini:Ini,root:&PathBuf,opath:&PathBuf){
   let data_file = OpenOptions::new().read(true).write(true).append(false).create(true).open(&data);
   let conf_file = OpenOptions::new().read(true).write(true).append(false).create(true).open(&conf);
 
-  let (mut core_ini,conf_ini,data_ini)=ini.code(root,opath);
+  let (mut core_ini,conf_ini,data_ini)=ini.code(root,opath,random);
   let error_text: ColoredString="[Error]".red();
 
   core_ini.set_kv("core".to_string(), "copyFrom".to_string(), "".to_string()+data_path.to_str().unwrap()+","+conf_path.to_str().unwrap());
 
     match write_to(&core_ini,&mut core_file.unwrap()){
-    Ok(())=>{},
-      Err(err)=>{println!("{}{} :{}",ini.path.display(),error_text,err)}
+      Ok(())=>{},
+      Err(err)=>{return Err(format!("{}{} :{}",ini.path.display(),error_text,err))}
     };
     match write_to(&conf_ini,&mut conf_file.unwrap()){
       Ok(())=>{},
-      Err(err)=>{println!("{}{} :{}",ini.path.display(),error_text,err)}
+      Err(err)=>{return Err(format!("{}{} :{}",ini.path.display(),error_text,err))}
     };
     match write_to(&data_ini,&mut data_file.unwrap()){
       Ok(())=>{},
-      Err(err)=>{println!("{}{} :{}",ini.path.display(),error_text,err)}
+      Err(err)=>{return Err(format!("{}{} :{}",ini.path.display(),error_text,err))}
     };
+  Ok(())
 }
 
 //输出ini到文件
@@ -156,8 +189,7 @@ fn write_to<W: Write>(ini: &Ini, writer: &mut W) -> io::Result<()> {
     Ok(())
 }
 
-fn get_bin() -> String{
-  let mut random:ThreadRng = rand::thread_rng();
+fn get_bin(random:&mut ThreadRng) -> String{
   let i =random.gen::<u32>();
   let mut re:String=String::from("");
   let mut tmp = i;
@@ -176,10 +208,10 @@ fn get_bin() -> String{
   return re.replace("2", "l").replace("1", "I").replace("0", "1");
 }
 
-fn get_name(opath:&PathBuf)->String{//获取一个不会重复的文件名
-  let a = get_bin();
+fn get_name(opath:&PathBuf,random:&mut ThreadRng)->String{//获取一个不会重复的文件名
+  let a = get_bin(random);
   if opath.join(&a).exists() {
-      return get_name(opath);
+      return get_name(opath,random);
   }else {
       return a;
   }
@@ -190,6 +222,7 @@ pub struct Ini {
     pub path:PathBuf,
     pub ppath: PathBuf, //父文件夹
     pub data: HashMap<String, HashMap<String, String>>,
+    pub refs: HashMap<String,String>
 }
 
 impl Ini {
@@ -197,94 +230,114 @@ impl Ini {
         match File::open(path) {
             Ok(file) => {
               let mut linecount = 0;
-                let br = BufReader::new(file);
-                let mut data: HashMap<String, HashMap<String, String>> = HashMap::new();
-                let mut m = Tmp {
-                    mode: Mode::COM,
-                    st: String::from(""),
-                    section_name: String::from(""),
-                    section: HashMap::new(),
-                    stname: String::new(),
-                }; //暂存原始字符串
-                for l in br.lines() {
-                    match l {
-                        Ok(line) => {
-                          use Mode::*;
-                            match &m.mode {
-                                COM => {//普通
-                                    use LineType::*;
-                                    match m.gettype(&line) {
-                                        STR => {
-                                            linecount+=1;
-                                        }
-                                        KV => {
-                                            let (k,v) = line.split_once(":").unwrap();
-                                            if v.starts_with("\"\"\"") {
-                                                //开始
-                                                if v.len() >= 6 && v.ends_with("\"\"\"") {
-                                                    m.addkv(k.to_string(), v.to_string())
-                                                } else {
-                                                    m.turn();
-                                                    m.setstrname(k.to_string());
-                                                    m.setstr(v.to_string()) //开始记录原始字符串
-                                                }
-                                            } else {
-                                                m.addkv(k.to_string(), v.to_string());
-                                            }
-                                            linecount+=1;
-                                        }
-                                        SECTION => {
-                                            //此行是section
-                                            if !&m.getsname().is_empty() {
-                                                //此前存在section
-                                                  data.insert(m.getsname(), m.getsection());
-                                            }
-                                            m.clearsection();
-                                            m.setsname(line[1..line.len() - 1].to_string());
-                                            linecount+=1;
-                                        }
-                                        EMPTY => {linecount+=1;}
-                                        UNKNOW => {
-                                          linecount+=1;
-                                            return Err(format!("{} :第{}行格式错误",path.display(),linecount));
-                                        }
-                                    }
-                                }
-                                STR => {
-                                    //原始字符串记录
-                                    m.setstr(m.getstr() + "\n" + &line);
-                                    if line.ends_with("\"\"\"") {
-                                        m.addkv(m.getstrname(), m.getstr());
-                                        m.clearstr();
-                                        m.turn();
-                                    }
-                                    linecount+=1;
-                                }
+              let br = BufReader::new(file);
+              let mut data: HashMap<String, HashMap<String, String>> = HashMap::new();
+              let mut m = Tmp {
+                mode: Mode::COM,
+                st: String::from(""),
+                section_name: String::from(""),
+                section: HashMap::new(),
+                stname: String::new(),
+                refs: HashMap::new()
+              }; //暂存原始字符串
+              for l in br.lines() {
+                match l {
+                  Ok(line) => {
+                    use Mode::*;
+                      match &m.mode {
+                        COM => {//普通
+                          use LineType::*;
+                          match m.gettype(&line) {
+                            STR => {
+                              linecount+=1;
                             }
+                            KV => {
+                              if !m.getsname().eq("") {
+                                let (k,v) = line.split_once(":").unwrap();
+                                if v.starts_with("\"\"\"") {//开始
+                                  if v.len() >= 6 && v.ends_with("\"\"\"") {
+                                    m.addkv(k.to_string(), v.to_string())
+                                  } else {
+                                    m.turn();
+                                    m.setstrname(k.to_string());
+                                    m.setstr(v.to_string()) //开始记录原始字符串
+                                  }
+                                } else {
+                                    m.addkv(k.to_string(), v.to_string());
+                                }
+                                linecount+=1;
+                              }else {
+                                return Err(format!("{}{} :第{}行格式错误: {}","[Error]".red(),path.display(),linecount,line));
+                              }
+                            }
+                            SECTION => {
+                            //此行是section
+                              if !&m.getsname().is_empty() {
+                              //此前存在section
+                                data.insert(m.getsname(), m.getsection());
+                              }
+                                m.clearsection();
+                                m.setsname(line[1..line.len() - 1].to_string());
+                                linecount+=1;
+                            }
+                            EMPTY => {linecount+=1;}
+                            UNKNOW => {
+                              linecount+=1;
+                              return Err(format!("{}{} :第{}行格式错误: {}","[Error]".red(),path.display(),linecount,line));
+                            }
+                          }
                         }
-                        Err(_) => {
-                            
+                        STR => {//原始字符串记录
+                          m.setstr(m.getstr() + "\n" + &line);
+                          if line.ends_with("\"\"\"") {
+                            m.addkv(m.getstrname(), m.getstr());
+                            m.clearstr();
+                            m.turn();
+                          }
+                          linecount+=1;
                         }
-                    }
+                      }
+                  }
+                  Err(_) => {}
                 }
-                if !m.getsname().is_empty() {
-                  data.insert(m.getsname(), m.getsection());
-                }
-                let mut p = path.clone();
-                p.pop();
-                return Ok(Ini {path: path.to_path_buf(), data, ppath: p });
+              }
+              if !m.getsname().is_empty() {
+                data.insert(m.getsname(), m.getsection());
+              }
+              let mut p = path.clone();
+              p.pop();
+              return Ok(Ini {path: path.to_path_buf(), data, ppath: p ,refs:m.refs});
             }
             Err(_) => {
                 return Err(String::from(format!("打开文件 {} 失败",path.display())));
             }
       }
     }
-    fn code(&self,root:&PathBuf,opath:&PathBuf) -> (Ini, Ini, Ini) {
+    fn code(&mut self,root:&PathBuf,opath:&PathBuf,random:&mut ThreadRng) -> (Ini, Ini, Ini) {
         let mut core_ini = Ini::new();
         let mut conf_ini = Ini::new();
         let mut data_ini = Ini::new();
+        let regex = Regex::new(r#"\$\{.{0,}\}"#).unwrap();
         for sec in &self.data{
-            for (k, v) in sec.1 {
+            for (k, mut v) in sec.1 {
+                //解${}引用
+                if regex.is_match(v.as_bytes()).unwrap(){
+                  match regex.captures(v.as_bytes()).unwrap() {
+                    Some(re) => {
+                      use RefType::*;
+                      let s=std::str::from_utf8(re.get(0).unwrap().as_bytes()).unwrap();
+                      match getrf(s) {
+                        SREF => {println!("sref:{}",s)},
+                        REF => {
+                          v=sec.1.get(s).unwrap();
+                        },
+                        BDS => {println!("bds:{}",s)},
+                    }
+                    },
+                    None => todo!(),
+                }
+                  //println!("{}",.get(0).unwrap().as_bytes()).unwrap())
+                }
                 //过滤不能使用$的键
                 match &k[..] {
                     "name"
@@ -353,7 +406,7 @@ impl Ini {
                       },
                       //将图片复制到输出路径
                       "image"|"image_wreak"|"image_turret"|"image_shadow"|"image_back"=>{
-                        let image_opath = opath.join(get_name(opath));
+                        let image_opath = opath.join(get_name(opath,random));
                         let v=v.trim();
                         let image_path = if v.starts_with("ROOT:") {
                           root.join(v.replace("\n", "\\n").replace("ROOT:/", "").replace("ROOT:", ""))
@@ -393,8 +446,8 @@ impl Ini {
                         }
                       }
                       _=>{
-                        let cs = get_bin();//随机节名
-                        let ck = get_bin();//随机键名
+                        let cs = get_bin(random);//随机节名
+                        let ck = get_bin(random);//随机键名
                         match conf_ini.data.get_mut(sec.0) {
                             Some(conf_sec) => {
                                 conf_sec
@@ -499,7 +552,8 @@ impl Ini {
         Ini {
             path:PathBuf::new(),
             ppath: PathBuf::new(),
-            data: HashMap::new()
+            data: HashMap::new(),
+            refs: HashMap::new()
         }
     }
 }
@@ -529,25 +583,24 @@ enum Mode {
     STR,
 }
 
-
-
 struct Tmp {
     mode: Mode,
     st: String,
     stname: String,
     section_name: String,
     section: HashMap<String, String>,
+    refs: HashMap<String, String>
 }
 
 impl Tmp {
 
   fn gettype(&self,line: &String) -> LineType {
     let line = line.trim();
-      if line.starts_with("[") {
+      if line.starts_with("[") && line.ends_with("]") {
           LineType::SECTION
-      } else if line.contains(":") {
+      } else if line.contains(":")&&!line.ends_with(":") {
           LineType::KV
-      } else if line.is_empty() || line.eq("") || line.replace(" ", "").is_empty() {
+      } else if line.is_empty() {
           LineType::EMPTY
       } else if line.ends_with("\"\"\"")||line.starts_with("#")||self.getsname().starts_with("comment_") {
           LineType::STR
@@ -596,4 +649,18 @@ impl Tmp {
     }
 }
 
+enum RefType {
+    SREF,//跨节引用
+    REF,//纯纯的引用
+    BDS//表达式
+}
 
+fn getrf(s:&str)->RefType {
+    if s.contains("+")||s.contains("-")||s.contains("*")||s.contains("/") {
+        RefType::BDS
+    }else if s.contains(".") {
+        RefType::SREF
+    }else {
+        RefType::REF
+    }
+}

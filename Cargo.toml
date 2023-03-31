@@ -8,9 +8,9 @@ clap = { version = "3", features = ["yaml"] }
 colored = "2.0.0"
 walkdir = "2.3.2"
 rand = "*"
-indicatif = "0.17.2"
 hashbrown = "*"
 rayon = "*"
+pcre2 = "*"
 
 [profile.release]
 opt-level = 'z'
