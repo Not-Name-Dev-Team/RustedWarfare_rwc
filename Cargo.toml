@@ -4,9 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-clap = { version = "3", features = ["yaml"] }
-colored = "2.0.0"
-walkdir = "2.3.2"
+clap = { version = "3.2.25", features = ["yaml"] }
+colored = "2.1.0"
+walkdir = "2.4.0"
 rand = "*"
 hashbrown = "*"
 rayon = "*"
